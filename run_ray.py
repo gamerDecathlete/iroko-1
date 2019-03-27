@@ -125,37 +125,52 @@ def set_tuning_parameters(agent, config):
         # Postprocess the perturbed config to ensure it's still valid
         def explore(config):
             # ensure we collect enough timesteps to do sgd
+            config["train_batch_size"] = max(config["train_batch_size"], 4) #should be 4 at minimum
             if config["train_batch_size"] < config["sgd_minibatch_size"] * 2:
                 config["train_batch_size"] = config["sgd_minibatch_size"] * 2
+            
             # ensure we run at least one sgd iter
             if config["num_sgd_iter"] < 1:
                 config["num_sgd_iter"] = 1
+            if config['horizon'] < 32:
+                config['horizon'] = 32
+            for k in config.keys():
+                if k == 'use_gae':
+                    continue #that one is fine and also non numeric
+                if config[k] < 0.0:
+                    config[k] = 0.0 #this...is a lazy way to make sure things are at worse 0
             return config
-        # optimization related parameters
-        # hype_params["kl_coeff"] = lambda: random.uniform(.1, .8)
-        # hype_params["entropy_coeff"] = lambda: random.uniform(0.0, 1.0)
-        # hype_params["kl_target"] = lambda: random.uniform(0.0, 0.05)
-        hype_params = {
-            "lambda": lambda: random.uniform(0.9, 1.0),
-            "clip_param": lambda: random.uniform(0.01, 0.5),
-            "lr": [1e-3, 5e-4, 1e-4, 5e-5, 1e-5],
-            "num_sgd_iter": lambda: random.randint(1, 30),
-            "sgd_minibatch_size": lambda: random.randint(128, 16384),
-            "train_batch_size": lambda: random.randint(2000, 160000),
+        #mutation distributions
+        hyper_params = {
+            #update frequency
+            "horizon": lambda : random.randint(32, 5000),
+            "train_batch_size": lambda: random.randint(4,  4096),
+            "num_sgd_iter": lambda: random.randint(3, 30),
+            #Objective hyperparams:
+            'clip_param': lambda: random.choice([0.1, 0.2, 0.3]),
+            'kl_target': lambda: random.uniform(0.003, 0.03),
+            'kl_coeff': lambda: random.uniform(0.3, 1),
+            'use_gae': lambda:random.choice([True, False]),
+            'gamma': lambda: random.choice([0.99, random.uniform(0.8, 0.9997), random.uniform(0.8, 0.9997)]),
+            'lambda': lambda: random.uniform(0.9, 1.0),
+
+            #val fn & entropy coeff
+            'vf_loss_coeff': lambda: random.choice([0.5, 1.0]),
+            'entropy_coeff': lambda: random.uniform(0, 0.01),
+            'sgd_stepsize': lambda: random.uniform(5e-6, 0.003),
+
         }
-        config["num_sgd_iter"] = tune.sample_from(
-            lambda spec: random.choice([10, 20, 30])),
-        config["sgd_minibatch_size"] = tune.sample_from(
-            lambda spec: random.choice([128, 512, 2048])),
-        config["train_batch_size"] = tune.sample_from(
-            lambda spec: random.choice([10000, 20000, 40000]))
+        #creates a wide range of the potential population
+        for k in hyper_params.keys():
+            config[k] = tune.sample_from(lambda spec: hyper_params[k])
+
         scheduler = PopulationBasedTraining(time_attr="time_total_s",
                                             reward_attr="episode_reward_mean",
                                             perturbation_interval=120,
-                                            resample_probability=0.25,
-                                            hyperparam_mutations=hype_params,
+                                            resample_probability=0.80,
+                                            hyperparam_mutations=hyper_params,
                                             custom_explore_fn=explore)
-
+                                           
     if agent.lower() == "ddpg":
         pass
 
